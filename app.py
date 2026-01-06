@@ -20,20 +20,27 @@ st.markdown("""
 # --- Helper Function: Save Uploaded File to Temp ---
 def save_uploaded_file(uploaded_file):
     """
-    Saves the uploaded streamlit file to a temporary file on disk
-    so MarkItDown can read it by path.
+    Saves the uploaded streamlit file to a temporary file on disk.
     """
     try:
-        # Get the suffix (extension) from the original file
         _, file_extension = os.path.splitext(uploaded_file.name)
-        
-        # Create a named temporary file (delete=False to keep it for processing)
         with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as tmp_file:
             tmp_file.write(uploaded_file.getvalue())
             return tmp_file.name
     except Exception as e:
         st.error(f"Error saving file: {e}")
         return None
+
+# --- Helper Function: Format File Size ---
+def format_size(size_in_bytes):
+    """
+    Converts bytes to readable formats (KB, MB).
+    """
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size_in_bytes < 1024.0:
+            return f"{size_in_bytes:.2f} {unit}"
+        size_in_bytes /= 1024.0
+    return f"{size_in_bytes:.2f} TB"
 
 # --- Main Logic ---
 
@@ -52,7 +59,7 @@ if uploaded_files:
     st.subheader("📝 Conversion Results")
 
     for uploaded_file in uploaded_files:
-        # Create an expander for each file to keep UI clean
+        # Create an expander for each file
         with st.expander(f"File: {uploaded_file.name}", expanded=True):
             
             # Save to temp disk
@@ -60,58 +67,81 @@ if uploaded_files:
             
             if temp_path:
                 try:
-                    # Show a spinner while processing
                     with st.spinner(f"Converting {uploaded_file.name}..."):
                         
-                        # --- THE ENGINE: Convert the file ---
-                        # Note: MarkItDown handles the underlying logic for supported formats
+                        # --- THE ENGINE: Convert ---
                         result = md.convert(temp_path)
                         text_content = result.text_content
 
-                    # --- Success UI ---
+                        # --- CALCULATIONS: Size Comparison ---
+                        # 1. Get original size from the temp file on disk
+                        original_size = os.path.getsize(temp_path)
+                        
+                        # 2. Get converted size (length of string in bytes)
+                        converted_size = len(text_content.encode('utf-8'))
+                        
+                        # 3. Calculate percentage reduction
+                        if original_size > 0:
+                            reduction_percent = ((original_size - converted_size) / original_size) * 100
+                        else:
+                            reduction_percent = 0
+
+                    # --- Success UI: TABS ---
                     st.success("Conversion Successful!")
                     
-                    # Preview Area
-                    st.text_area(
-                        "Preview:", 
-                        value=text_content, 
-                        height=250,
-                        key=f"preview_{uploaded_file.name}"
-                    )
+                    # Create two tabs
+                    tab_preview, tab_stats = st.tabs(["📄 Preview & Download", "📊 File Size Comparison"])
 
-                    # Prepare Filenames for Download
-                    base_name = os.path.splitext(uploaded_file.name)[0]
-                    md_filename = f"{base_name}_converted.md"
-                    txt_filename = f"{base_name}_converted.txt"
+                    # TAB 1: PREVIEW & DOWNLOAD
+                    with tab_preview:
+                        st.text_area(
+                            "Preview:", 
+                            value=text_content, 
+                            height=250,
+                            key=f"preview_{uploaded_file.name}"
+                        )
 
-                    # Download Buttons (Columns for layout)
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.download_button(
-                            label="⬇️ Download as Markdown (.md)",
-                            data=text_content,
-                            file_name=md_filename,
-                            mime="text/markdown",
-                            key=f"dl_md_{uploaded_file.name}"
-                        )
-                    
-                    with col2:
-                        st.download_button(
-                            label="⬇️ Download as Text (.txt)",
-                            data=text_content,
-                            file_name=txt_filename,
-                            mime="text/plain",
-                            key=f"dl_txt_{uploaded_file.name}"
-                        )
+                        base_name = os.path.splitext(uploaded_file.name)[0]
+                        md_filename = f"{base_name}_converted.md"
+                        txt_filename = f"{base_name}_converted.txt"
+
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.download_button(
+                                label="⬇️ Download Markdown (.md)",
+                                data=text_content,
+                                file_name=md_filename,
+                                mime="text/markdown",
+                                key=f"dl_md_{uploaded_file.name}"
+                            )
+                        with col2:
+                            st.download_button(
+                                label="⬇️ Download Text (.txt)",
+                                data=text_content,
+                                file_name=txt_filename,
+                                mime="text/plain",
+                                key=f"dl_txt_{uploaded_file.name}"
+                            )
+
+                    # TAB 2: FILE SIZE COMPARISON
+                    with tab_stats:
+                        # Create data for the table
+                        data = {
+                            "Metric": ["Original File Size", "Converted (.txt) Size"],
+                            "Size": [format_size(original_size), format_size(converted_size)]
+                        }
+                        
+                        # Display Table
+                        st.table(data)
+
+                        # Display Highlighted Metric
+                        st.markdown(f"### 📉 Space Saved: **{reduction_percent:.1f}%**")
+                        st.caption(f"The text version is {reduction_percent:.1f}% smaller than the original document.")
 
                 except Exception as e:
-                    # --- Error Handling ---
-                    st.error(f"⚠️ Could not read **{uploaded_file.name}**. Please check the format.")
-                    # Optional: Print actual error to console for debugging
-                    print(f"Error processing {uploaded_file.name}: {e}")
+                    st.error(f"⚠️ Could not read **{uploaded_file.name}**.")
+                    st.error(f"Detailed Error: {e}")
                 
                 finally:
-                    # Cleanup: Remove the temp file from disk
                     if os.path.exists(temp_path):
                         os.remove(temp_path)
